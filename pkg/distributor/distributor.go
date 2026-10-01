@@ -7,6 +7,7 @@ import (
 	"math"
 	"net/http"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -65,6 +66,9 @@ const (
 	ringAutoForgetUnhealthyPeriods = 2
 
 	timeShardLabel = "__time_shard__"
+
+	// tenantHeaderKey is the Kafka record header carrying the tenant ID.
+	tenantHeaderKey = "X-Scope-OrgID"
 )
 
 var (
@@ -1579,6 +1583,13 @@ func (d *Distributor) recordsForStreams(
 		streamRecords, err := kafka.Encode(partition, tenant, flat, d.cfg.KafkaConfig.ProducerMaxRecordSizeBytes)
 		if err != nil {
 			return nil, fmt.Errorf("failed to marshal streams to records: %w", err)
+		}
+		// Key records by stream so that all records of a stream share a key,
+		// and carry the tenant as a header alongside the trace context.
+		streamKey := []byte(strconv.FormatUint(stream.HashKeyNoShard, 16))
+		for _, rec := range streamRecords {
+			rec.Key = streamKey
+			rec.Headers = append(rec.Headers, kgo.RecordHeader{Key: tenantHeaderKey, Value: []byte(tenant)})
 		}
 		records = append(records, streamRecords...)
 	}
